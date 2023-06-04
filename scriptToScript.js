@@ -204,5 +204,6 @@ export {
     getOpenedPorts,
     closePort,
     queryAllPacks,
-    lastQueryResult
+    lastQueryResult,
+    setName
 }
