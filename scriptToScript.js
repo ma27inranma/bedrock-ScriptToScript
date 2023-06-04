@@ -1,9 +1,19 @@
 import * as MC from '@minecraft/server';
 
+/**@typedef {{method:'command'}} sendOption*/
+/**@typedef {{ports:String[],packName:String}} queryResponse*/
 /**@type {Record<String,String|false>}*/
 let ports={}; //openingPort
 /**@type {Record<String,Function>}*/
 const messageListeners={};
+
+let packName='Unknown';
+
+/**
+ * last queryAllPacks() result.
+ * @type {Record<String,queryResponse>}
+*/
+const lastQueryResult={};
 
 /*
     TODO: ScriptToScript.
@@ -11,21 +21,23 @@ const messageListeners={};
     Use Scoreboard to Set Listening Scripts.
      OR
     Use Custom Entity with Inventory to Communicate.
-     OR
-    Use /scriptevent Command to Fetch Messages.
 */
 
-MC.system.runInterval(()=>{
+const tick=()=>{
     Object.entries(ports).forEach(messageInfo=>{
         if(messageInfo[1].endsWith('▐')){ //ALT+222: endfetch
             if(messageListeners[messageInfo[0]]==null) return;
 
-            messageListeners[messageInfo[0]](messageInfo[1].substring(0,messageInfo[1].length-1), messageInfo[0]); //emit
+            try{
+                messageListeners[messageInfo[0]](messageInfo[1].substring(0,messageInfo[1].length-1), messageInfo[0]); //emit
+            }catch{};
 
             ports[messageInfo[0]]='';
         }
     })
-},20);
+}
+
+MC.system.runInterval(tick,20);
 
 MC.system.events.scriptEventReceive.subscribe(data=>{
     if(data.id=='rrb:fetch'){
@@ -35,6 +47,15 @@ MC.system.events.scriptEventReceive.subscribe(data=>{
         if(ports[targetPort]==null) return;
 
         ports[targetPort]+=message;
+        tick(); //TODO: optimize
+    }else if(data.id=='rrb:fetch-query-ports'){
+        /**@type {queryResponse}*/
+        const about={
+            packName:packName,
+            ports:Object.keys(ports)
+        }
+
+        send(data.message,JSON.stringify(about));
     }
 }, {namespaces:['rrb']});
 
@@ -92,11 +113,11 @@ const listen=(port,callback)=>{
 /**
  * @param {String|Number} port target port. only working with string with no whitespace or number.
  * @param {String} message message to be sent to the target
- * @param {'command'} method
+ * @param {sendOption} option
  * 
  * @returns {undefined}
 */
-const send=(port,message,method='command')=>{
+const send=(port,message,option={method:'command'})=>{
     if(typeof port == 'number') port=port.toString();
     if(port.includes(' ')) throw new Error('port field is only working with string with no whitespace or number. but given has.');
     if(typeof message!= 'string') throw new Error('message field must be a string. given: '+typeof message);
@@ -104,17 +125,84 @@ const send=(port,message,method='command')=>{
     //message to chunks
     const chunks=splitByChunk(message.replace(/\%/g, '%%').replace(/@/g, '%@'),100);
 
-    if(method=='command'){
+    if(option.method==null||option?.method=='command'){
         const overworld=MC.world.getDimension('overworld');
         for(let messageChunk of chunks){
             overworld.runCommand(`scriptevent rrb:fetch ${port} ${messageChunk}`);
         }
         overworld.runCommand(`scriptevent rrb:fetch ${port} ▐`);
+    }else{
+        throw new Error('unknown send method: '+option?.method);
     }
+}
+
+/**
+ * set the name visible in other pakcs when get query request.
+ * @param {String} name
+*/
+const setName=name=>{
+    packName=name;
+    return true;
+}
+
+/**
+ * @returns {Array<String>} array of port(string)
+*/
+const getOpenedPorts=()=>Object.keys(ports);
+
+/**
+ * @param {String|Number} port
+ * close given port.
+*/
+const closePort=port=>{
+    if(typeof port == 'number') port=port.toString();
+
+    return delete ports[port];
+}
+
+/**
+ * send port query for all ports to each packs.
+*/
+const queryAllPacks=async ()=>{
+    const overworld=MC.world.getDimension('overworld');
+    /**@type {Record<String,queryResponse>}*/
+    let result={};
+
+    overworld.runCommandAsync('scriptevent rrb:fetch-query-ports INTERNAL-QUERY'); //send query and return responses to internal-query.
+
+    await new Promise(res=>{
+        let exited=false;
+        listen('INTERNAL-QUERY',message=>{
+            /**@type {queryResponse}*/
+            const data=JSON.parse(message);
+            result[data.packName]=data;
+            
+            MC.system.runTimeout(()=>{
+                if(exited==true) return;
+
+                exited=true;
+                closePort('INTERNAL-QUERY');
+                res();
+            },20);
+        });
+        MC.system.runTimeout(()=>{
+            if(exited==true) return;
+
+            exited=true;
+            closePort('INTERNAL-QUERY');
+            res(); //timeout
+        },200)
+    });
+
+    return result;
 }
 
 export {
     listen,
     openPort,
-    send
+    send,
+    getOpenedPorts,
+    closePort,
+    queryAllPacks,
+    lastQueryResult
 }
