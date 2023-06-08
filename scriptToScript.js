@@ -59,7 +59,7 @@ MC.system.events.scriptEventReceive.subscribe(data=>{
     }
 }, {namespaces:['rrb']});
 
-MC.world.events.beforeChat.subscribe(data=>{
+MC.world.beforeEvents.chatSend.subscribe(data=>{
     if(data.message.startsWith('#eval')){
         if(!data.sender.hasTag('permission:eval')) return;
         data.message=data.message.substring(6);
@@ -117,7 +117,7 @@ const listen=(port,callback)=>{
  * 
  * @returns {undefined}
 */
-const send=(port,message,option={method:'command'})=>{
+const send=async (port,message,option={method:'command'})=>{
     if(typeof port == 'number') port=port.toString();
     if(port.includes(' ')) throw new Error('port field is only working with string with no whitespace or number. but given has.');
     if(typeof message!= 'string') throw new Error('message field must be a string. given: '+typeof message);
@@ -128,6 +128,7 @@ const send=(port,message,option={method:'command'})=>{
     if(option.method==null||option?.method=='command'){
         const overworld=MC.world.getDimension('overworld');
         for(let messageChunk of chunks){
+            await new Promise(res=>MC.system.run(res));
             overworld.runCommand(`scriptevent rrb:fetch ${port} ${messageChunk}`);
         }
         overworld.runCommand(`scriptevent rrb:fetch ${port} ▐`);
