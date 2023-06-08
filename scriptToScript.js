@@ -127,8 +127,8 @@ const send=async (port,message,option={method:'command'})=>{
 
     if(option.method==null||option?.method=='command'){
         const overworld=MC.world.getDimension('overworld');
+     	await new Promise(res=>MC.system.run(res));
         for(let messageChunk of chunks){
-            await new Promise(res=>MC.system.run(res));
             overworld.runCommand(`scriptevent rrb:fetch ${port} ${messageChunk}`);
         }
         overworld.runCommand(`scriptevent rrb:fetch ${port} ▐`);
